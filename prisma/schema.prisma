@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// AUTH TABLES (required by NextAuth)
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?   // for email+password login
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  predictions   Prediction[]
+  leagueMembers LeagueMember[]
+  ownedLeagues  League[]       @relation("LeagueOwner")
+  scores Score[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// F1 APP TABLES
+// ============================================
+
+model Race {
+  id               String     @id @default(cuid())
+  meetingKey       Int        @unique  // from OpenF1 API
+  sessionKey       Int        @unique  // from OpenF1 API
+  name             String              // e.g. "Australian Grand Prix"
+  circuitName      String              // e.g. "Melbourne"
+  country          String              // e.g. "Australia"
+  countryCode      String              // e.g. "AUS"
+  location         String              // e.g. "Melbourne"
+  raceDate         DateTime            // actual race start time
+  qualifyingDate   DateTime            // when predictions lock
+  isSprint         Boolean   @default(false)
+  isCancelled      Boolean   @default(false)
+  status           RaceStatus @default(OPEN)
+  createdAt        DateTime  @default(now())
+
+  // Relations
+  predictions      Prediction[]
+  scores           Score[]
+}
+
+enum RaceStatus {
+  OPEN      // predictions can be submitted
+  LOCKED    // qualifying started, no more changes
+  SCORED    // race done, results calculated
+}
+
+model Prediction {
+  id          String   @id @default(cuid())
+  userId      String
+  raceId      String
+  grid        Json     // stores the predicted P1-P20 as ordered array of driver numbers
+  dnfDrivers  Int[]    // array of driver numbers predicted to DNF
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  race  Race  @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  score Score?
+
+  @@unique([userId, raceId]) // one prediction per user per race
+}
+
+model Score {
+  id               String   @id @default(cuid())
+  userId           String
+  raceId           String
+  predictionId     String   @unique
+  totalPoints      Int      @default(0)
+  exactHits        Int      @default(0)  // number of exact position matches
+  nearHits         Int      @default(0)  // number of ±1 or ±2 matches
+  dnfBonuses       Int      @default(0)  // number of correct DNF predictions
+  actualGrid       Json     // stores actual finishing order for reference
+  calculatedAt     DateTime @default(now())
+
+  // Relations
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  race       Race       @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, raceId])
+}
+
+model League {
+  id          String   @id @default(cuid())
+  name        String
+  inviteCode  String   @unique @default(cuid())
+  ownerId     String
+  createdAt   DateTime @default(now())
+
+  // Relations
+  owner   User           @relation("LeagueOwner", fields: [ownerId], references: [id])
+  members LeagueMember[]
+}
+
+model LeagueMember {
+  id       String @id @default(cuid())
+  userId   String
+  leagueId String
+  joinedAt DateTime @default(now())
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, leagueId]) // can't join same league twice
+}
